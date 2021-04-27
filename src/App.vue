@@ -30,8 +30,11 @@
       <button v-on:click="runRelayer">Run Relayer</button>
     </div>
      <div v-if="step==5">
-      <button v-on:click="stopRelayer">Stop Relayer</button>
-      <button v-on:click="sendIBCtransaction">Send Demo Transaction</button>
+      <button v-on:click="stopRelayer">Stop Relayer</button><br/>
+      <input v-model="transaction.senderMnemonic" placeholder="Sender mnemonic on chain A"/><br/>
+      <input v-model="transaction.rcptAddress" placeholder="Recipient address on chain b"/><br/>
+      <input v-model="transaction.amount" placeholder="Amount to transfer (e.g. 1token)"/><br/>
+      <button v-on:click="sendIBCtransaction">Send IBC Transfer Transaction</button>
     </div>
   </div>
 </template>
@@ -40,8 +43,9 @@
 import { stringToPath } from "@cosmjs/crypto";
 import { IbcClient, Link } from "@confio/relayer/build";
 import { DirectSecp256k1HdWallet } from "@cosmjs/proto-signing";
-import { GasPrice } from '@cosmjs/launchpad'
-
+import { GasPrice,parseCoins } from '@cosmjs/launchpad'
+import { SigningStargateClient } from "@cosmjs/stargate"
+import Long from 'long'
 export default {
   name: "App",
   data() {
@@ -49,19 +53,23 @@ export default {
       step: 1,
       config: {
         chainA: {
-          endpoint: "http://localhost:26657",
-          addrPrefix: "mars",
-          gasPrice: "0.0001token",
+          endpoint: "",
+          addrPrefix: "",
+          gasPrice: "",
           mnemonic:
-            "purity ancient awesome mobile sight mechanic planet click funny voice truck jazz kingdom tiny series unveil leader analyst about despair orphan observe over camera",
+            "",
         },
         chainB: {
-          endpoint: "http://localhost:26659",
-          addrPrefix: "planet",
-          gasPrice: "0.0001token",
-          mnemonic:
-            "output gasp join carbon run dismiss hazard sudden digital wrestle robot grunt grief success quarter pill estate castle episode asthma bachelor woman helmet silly",
+          endpoint: "",
+          addrPrefix: "",
+          gasPrice: "",
+          mnemonic: "",
         },
+      },
+      transaction: {
+        senderMnemonic:'',
+        amount: '',
+        rcptAddress: ''
       },
       signerA:null,
       signerB:null,
@@ -105,6 +113,34 @@ export default {
     },
     sleep(ms) {
       return new Promise(resolve => setTimeout(resolve, ms));
+    },
+    async sendIBCtransaction() {
+      
+      const signer = await DirectSecp256k1HdWallet.fromMnemonic(
+        this.transaction.senderMnemonic,
+        stringToPath("m/44'/118'/0'/0/0"),
+        this.config.chainA.addrPrefix
+      );
+      const client = await SigningStargateClient.connectWithSigner(this.config.chainA.endpoint,signer);
+      const [fromAccount]= (await signer.getAccounts())
+      const msg = {
+          typeUrl: "/ibc.applications.transfer.v1.MsgTransfer",
+          value: {
+            sourcePort: 'transfer',
+            sourceChannel: this.channels.src.channelId,
+            sender: fromAccount.address,
+            receiver: this.transaction.rcptAddress,
+            timeoutTimestamp: Long.fromString(new Date().getTime() + 60000 + '000000'),
+            token: parseCoins(this.transaction.amount)[0]
+          },
+        };
+
+        const fee = {
+          amount: [],
+          gas: "200000",
+        };
+
+        await client.signAndBroadcast(fromAccount.address, [msg], fee)
     },
     async relayerLoop(options={ poll: 5000, maxAgeDest: 86400, maxAgeSrc: 86400 }) {
       while (this.running) {
